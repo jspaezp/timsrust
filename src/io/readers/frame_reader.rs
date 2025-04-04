@@ -4,13 +4,15 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 #[cfg(feature = "timscompress")]
 use timscompress::reader::CompressedTdfBlobReader;
 
-use crate::ms_data::{AcquisitionType, Frame, MSLevel, QuadrupoleSettings};
+use crate::ms_data::{
+    AcquisitionType, Frame, FrameMeta, MSLevel, QuadrupoleSettings,
+};
 
 use super::{
     file_readers::{
         sql_reader::{
-            frame_groups::SqlWindowGroup, frames::SqlFrame, ReadableSqlTable,
-            SqlReader, SqlReaderError,
+            frame_groups::SqlWindowGroup, frames::SqlFrame, quad_settings,
+            ReadableSqlTable, SqlReader, SqlReaderError,
         },
         tdf_blob_reader::{TdfBlob, TdfBlobReader, TdfBlobReaderError},
     },
@@ -23,7 +25,7 @@ pub struct FrameReader {
     tdf_bin_reader: TdfBlobReader,
     #[cfg(feature = "timscompress")]
     compressed_reader: CompressedTdfBlobReader,
-    frames: Vec<Frame>,
+    frames_meta: Vec<FrameMeta>,
     acquisition: AcquisitionType,
     offsets: Vec<usize>,
     dia_windows: Option<Vec<Arc<QuadrupoleSettings>>>,
@@ -78,7 +80,7 @@ impl FrameReader {
             .into_iter()
             .map(|x| Arc::new(x))
             .collect();
-        let frames = (0..sql_frames.len())
+        let frames_meta = (0..sql_frames.len())
             .into_par_iter()
             .map(|index| {
                 get_frame_without_data(
@@ -100,7 +102,7 @@ impl FrameReader {
         let offsets = sql_frames.iter().map(|x| x.binary_offset).collect();
         let reader = Self {
             tdf_bin_reader,
-            frames,
+            frames_meta,
             acquisition,
             offsets,
             dia_windows: match acquisition {
@@ -121,23 +123,23 @@ impl FrameReader {
         self.offsets[index]
     }
 
-    pub fn parallel_filter<'a, F: Fn(&Frame) -> bool + Sync + Send + 'a>(
+    pub fn parallel_filter<'a, F: Fn(&FrameMeta) -> bool + Sync + Send + 'a>(
         &'a self,
         predicate: F,
     ) -> impl ParallelIterator<Item = Result<Frame, FrameReaderError>> + 'a
     {
         (0..self.len())
             .into_par_iter()
-            .filter(move |x| predicate(&self.frames[*x]))
+            .filter(move |x| predicate(&self.frames_meta[*x]))
             .map(move |x| self.get(x))
     }
 
-    pub fn filter<'a, F: Fn(&Frame) -> bool + Sync + Send + 'a>(
+    pub fn filter<'a, F: Fn(&FrameMeta) -> bool + Sync + Send + 'a>(
         &'a self,
         predicate: F,
     ) -> impl Iterator<Item = Result<Frame, FrameReaderError>> + 'a {
         (0..self.len())
-            .filter(move |x| predicate(&self.frames[*x]))
+            .filter(move |x| predicate(&self.frames_meta[*x]))
             .map(move |x| self.get(x))
     }
 
@@ -161,21 +163,22 @@ impl FrameReader {
         index: usize,
     ) -> Result<Frame, FrameReaderError> {
         // NOTE: get does it by 0-offsetting the vec, not by Frame index!!!
-        let mut frame = self.get_frame_without_coordinates(index)?;
+        let meta = self.get_frame_without_coordinates(index)?;
         let offset = self.get_binary_offset(index);
         let blob = self.tdf_bin_reader.get(offset)?;
         let scan_count: usize =
             blob.get(0).ok_or(FrameReaderError::CorruptFrame)? as usize;
         let peak_count: usize = (blob.len() - scan_count) / 2;
-        frame.scan_offsets = read_scan_offsets(scan_count, peak_count, &blob)?;
-        frame.intensities = read_intensities(scan_count, peak_count, &blob)?;
-        frame.tof_indices = read_tof_indices(
-            scan_count,
-            peak_count,
-            &blob,
-            &frame.scan_offsets,
-        )?;
-        Ok(frame)
+        let scan_offsets = read_scan_offsets(scan_count, peak_count, &blob)?;
+        let tof_indices =
+            read_tof_indices(scan_count, peak_count, &blob, &scan_offsets)?;
+
+        Ok(Frame {
+            meta,
+            scan_offsets,
+            intensities: read_intensities(scan_count, peak_count, &blob)?,
+            tof_indices,
+        })
     }
 
     #[cfg(feature = "timscompress")]
@@ -185,23 +188,26 @@ impl FrameReader {
     ) -> Result<Frame, FrameReaderError> {
         // NOTE: get does it by 0-offsetting the vec, not by Frame index!!!
         // TODO
-        let mut frame = self.get_frame_without_coordinates(index)?;
+        let meta = self.get_frame_without_coordinates(index)?;
         let offset = self.get_binary_offset(index);
         let raw_frame = self
             .compressed_reader
             .get_raw_frame_data(offset, self.scan_count);
-        frame.tof_indices = raw_frame.tof_indices;
-        frame.intensities = raw_frame.intensities;
-        frame.scan_offsets = raw_frame.scan_offsets;
-        Ok(frame)
+
+        Ok(Frame {
+            meta,
+            scan_offsets: raw_frame.scan_offsets,
+            intensities: raw_frame.intensities,
+            tof_indices: raw_frame.tof_indices,
+        })
     }
 
     pub fn get_frame_without_coordinates(
         &self,
         index: usize,
-    ) -> Result<Frame, FrameReaderError> {
+    ) -> Result<FrameMeta, FrameReaderError> {
         let frame = self
-            .frames
+            .frames_meta
             .get(index)
             .ok_or(FrameReaderError::IndexOutOfBounds)?
             .clone();
@@ -227,7 +233,7 @@ impl FrameReader {
     }
 
     pub fn len(&self) -> usize {
-        self.frames.len()
+        self.frames_meta.len()
     }
 }
 
@@ -291,24 +297,34 @@ fn get_frame_without_data(
     acquisition: AcquisitionType,
     window_groups: &Vec<u8>,
     quadrupole_settings: &Vec<Arc<QuadrupoleSettings>>,
-) -> Frame {
-    let mut frame: Frame = Frame::default();
+) -> FrameMeta {
     let sql_frame = &sql_frames[index];
-    frame.index = sql_frame.id;
-    frame.ms_level = MSLevel::read_from_msms_type(sql_frame.msms_type);
-    frame.rt_in_seconds = sql_frame.rt;
-    frame.acquisition_type = acquisition;
-    frame.intensity_correction_factor = 1.0 / sql_frame.accumulation_time;
-    if (acquisition == AcquisitionType::DIAPASEF)
-        & (frame.ms_level == MSLevel::MS2)
+    let sql_index = sql_frame.id;
+    let ms_level = MSLevel::read_from_msms_type(sql_frame.msms_type);
+    let rt_in_seconds = sql_frame.rt;
+    let acquisition_type = acquisition;
+    let intensity_correction_factor = 1.0 / sql_frame.accumulation_time;
+    let (window_group, lqs) = if (acquisition == AcquisitionType::DIAPASEF)
+        & (ms_level == MSLevel::MS2)
     {
         // TODO should be refactored out to quadrupole reader
         let window_group = window_groups[index];
-        frame.window_group = window_group;
-        frame.quadrupole_settings =
+        let quadrupole_settings =
             quadrupole_settings[window_group as usize - 1].clone();
+        (window_group, quadrupole_settings)
+    } else {
+        (0, Arc::new(QuadrupoleSettings::default()))
+    };
+
+    FrameMeta {
+        index: sql_index,
+        ms_level,
+        rt_in_seconds,
+        acquisition_type,
+        intensity_correction_factor,
+        window_group,
+        quadrupole_settings: lqs,
     }
-    frame
 }
 
 #[derive(Debug, thiserror::Error)]
