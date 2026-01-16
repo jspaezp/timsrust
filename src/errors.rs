@@ -1,7 +1,6 @@
 #[cfg(feature = "tdf")]
-use crate::io::readers::{
-    FrameReaderError, MetadataReaderError, QuadrupoleSettingsReaderError,
-};
+use crate::io::readers::{FrameReaderError, QuadrupoleSettingsReaderError};
+use crate::ms_data::MetadataReaderError;
 use crate::{io::readers::PrecursorReaderError, readers::SpectrumReaderError};
 
 /// An error that is produced by timsrust (uses [thiserror]).

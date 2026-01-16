@@ -9,10 +9,10 @@ use crate::{
     domain_converters::{ConvertableDomain, Tof2MzConverter},
     io::readers::{
         file_readers::sql_reader::{SqlReader, SqlReaderError},
-        FrameReader, FrameReaderError, MetadataReader, MetadataReaderError,
-        PrecursorReader, PrecursorReaderError,
+        FrameReader, FrameReaderError, PrecursorReader, PrecursorReaderError,
     },
     ms_data::Spectrum,
+    ms_data::{Metadata, MetadataReaderError},
     readers::TimsTofPathLike,
 };
 
@@ -32,7 +32,7 @@ impl TDFSpectrumReader {
         config: SpectrumReaderConfig,
     ) -> Result<Self, TDFSpectrumReaderError> {
         let frame_reader: FrameReader = FrameReader::new(&path)?;
-        let metadata = MetadataReader::new(&path)?;
+        let metadata = Metadata::new(&path)?;
         let mz_reader: Tof2MzConverter = metadata.mz_converter;
         let tdf_sql_reader = SqlReader::open(&path)?;
         let precursor_reader = PrecursorReader::build()

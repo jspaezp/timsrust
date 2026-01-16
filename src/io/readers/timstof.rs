@@ -3,6 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::{Metadata, MetadataReaderError};
+
+use super::{FrameReader, FrameReaderError};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum TimsTofFileType {
     #[cfg(feature = "minitdf")]
@@ -39,7 +43,7 @@ impl TimsTofPath {
                 Ok(result) => Ok(result),
                 Err(_) => Err(TimsTofPathError::UnknownType(path)),
             },
-            None => return Err(TimsTofPathError::UnknownType(path)),
+            None => Err(TimsTofPathError::UnknownType(path)),
         }
     }
 
@@ -61,6 +65,14 @@ impl TimsTofPath {
 
     pub fn file_type(&self) -> TimsTofFileType {
         self.file_type
+    }
+
+    pub fn load_frame_reader(&self) -> Result<FrameReader, FrameReaderError> {
+        FrameReader::new(self)
+    }
+
+    pub fn load_metadata(&self) -> Result<Metadata, MetadataReaderError> {
+        Metadata::new(self)
     }
 }
 
@@ -125,7 +137,7 @@ pub trait TimsTofPathLike: AsRef<Path> {
 
 impl<T: AsRef<Path>> TimsTofPathLike for T {
     fn to_timstof_path(&self) -> Result<TimsTofPath, TimsTofPathError> {
-        TimsTofPath::new(&self)
+        TimsTofPath::new(self)
     }
 }
 

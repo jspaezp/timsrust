@@ -27,7 +27,7 @@ impl DIARawSpectrumReader {
     ) -> Result<Self, DIARawSpectrumReaderError> {
         let expanded_quadrupole_settings =
             QuadrupoleSettingsReader::from_splitting(
-                &tdf_sql_reader,
+                tdf_sql_reader,
                 splitting_strategy,
             )?;
         let reader = Self {
@@ -49,19 +49,19 @@ impl DIARawSpectrumReader {
         let scan_start = quad_settings.scan_starts[0];
         let scan_end = quad_settings.scan_ends[0];
         let frame_index = quad_settings.index - 1;
-        let frame = self.frame_reader.get(frame_index)?;
-        let offset_start = frame.scan_offsets[scan_start] as usize;
-        let offset_end = frame.scan_offsets[scan_end] as usize;
-        let tof_indices = &frame.tof_indices[offset_start..offset_end];
-        let intensities = &frame.intensities[offset_start..offset_end];
+        let frame = self.frame_reader.get_by_internal_index(frame_index)?;
+        let offset_start = frame.peaks.scan_offsets[scan_start] as usize;
+        let offset_end = frame.peaks.scan_offsets[scan_end] as usize;
+        let tof_indices = &frame.peaks.tof_indices[offset_start..offset_end];
+        let intensities = &frame.peaks.intensities[offset_start..offset_end];
         let (raw_tof_indices, raw_intensities) = group_and_sum(
-            tof_indices.iter().map(|x| *x).collect(),
+            tof_indices.to_vec(),
             intensities.iter().map(|x| *x as u64).collect(),
         );
         let raw_spectrum = RawSpectrum {
             tof_indices: raw_tof_indices,
             intensities: raw_intensities,
-            index: index,
+            index,
             collision_energy,
             isolation_mz,
             isolation_width,
