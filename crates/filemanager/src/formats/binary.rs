@@ -1,6 +1,84 @@
 use memmap2::Mmap;
+use std::io;
 
 use crate::{Uri, cloud_store::CloudObject};
+
+/// A fixed-size byte source that fills buffers owned by the caller.
+pub trait ReadAt: std::fmt::Debug + Send + Sync {
+    /// Returns the byte length of the source.
+    fn len(&self) -> u64;
+    /// Returns whether the source has no bytes.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Fills the caller's buffer from the requested byte offset.
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()>;
+}
+
+/// Reads byte ranges from an injected object store.
+#[cfg(feature = "cloud")]
+#[derive(Debug)]
+pub struct ObjectStoreReadAt {
+    store: std::sync::Arc<dyn object_store::ObjectStore>,
+    path: object_store::path::Path,
+    len: u64,
+    e_tag: Option<String>,
+}
+
+#[cfg(feature = "cloud")]
+impl ObjectStoreReadAt {
+    /// Opens one object and records its size and ETag for later range reads.
+    pub fn new(
+        store: std::sync::Arc<dyn object_store::ObjectStore>,
+        path: object_store::path::Path,
+    ) -> io::Result<Self> {
+        let metadata = crate::runtime::block_on(store.head(&path))
+            .map_err(io::Error::other)?;
+        Ok(Self {
+            store,
+            path,
+            len: metadata.size as u64,
+            e_tag: metadata.e_tag,
+        })
+    }
+}
+
+#[cfg(feature = "cloud")]
+impl ReadAt for ObjectStoreReadAt {
+    fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        let end = offset
+            .checked_add(buf.len() as u64)
+            .filter(|&end| end <= self.len)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+        let start = usize::try_from(offset).map_err(io::Error::other)?;
+        let end = usize::try_from(end).map_err(io::Error::other)?;
+        if buf.is_empty() {
+            return Ok(());
+        }
+        let options = object_store::GetOptions {
+            range: Some(object_store::GetRange::Bounded(start..end)),
+            if_match: self.e_tag.clone(),
+            ..Default::default()
+        };
+        let bytes = crate::runtime::block_on(async {
+            self.store
+                .get_opts(&self.path, options)
+                .await?
+                .bytes()
+                .await
+        })
+        .map_err(io::Error::other)?;
+        if bytes.len() != buf.len() {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        buf.copy_from_slice(&bytes);
+        Ok(())
+    }
+}
 
 /// Errors from binary read/write operations.
 #[non_exhaustive]
@@ -126,6 +204,7 @@ impl BinaryWriter {
 enum Inner {
     Mmap(Mmap),
     Cloud(CloudObject),
+    External(Box<dyn ReadAt>),
 }
 
 impl Inner {
@@ -143,6 +222,11 @@ impl Inner {
                 })
                 .map(|s| s.to_vec()),
             Inner::Cloud(c) => c.range(range).map_err(BinaryError::Cloud),
+            Inner::External(source) => {
+                let mut data = vec![0; range.end - range.start];
+                source.read_exact_at(range.start as u64, &mut data)?;
+                Ok(data)
+            },
         }
     }
 
@@ -160,6 +244,7 @@ impl Inner {
                     })
             },
             Inner::Cloud(_) => Err(BinaryError::ViewUnavailable),
+            Inner::External(_) => Err(BinaryError::ViewUnavailable),
         }
     }
 }
@@ -221,6 +306,17 @@ pub struct BinaryReader {
 }
 
 impl BinaryReader {
+    /// Opens an injected byte-range source.
+    pub fn from_read_at(source: Box<dyn ReadAt>) -> Result<Self, BinaryError> {
+        let len = usize::try_from(source.len()).map_err(io::Error::other)?;
+        Ok(Self {
+            inner: Inner::External(source),
+            len,
+            original_uri: Uri::from("<read-at>"),
+            effective_uri: Uri::from("<read-at>"),
+        })
+    }
+
     /// Opens a file by URI for reading.
     ///
     /// Local paths are memory-mapped. Cloud URIs (`s3://`, `az://`, `gs://`, …)
@@ -243,6 +339,9 @@ impl BinaryReader {
         let len = match &inner {
             Inner::Mmap(m) => m.len(),
             Inner::Cloud(c) => c.len().map_err(BinaryError::Cloud)?,
+            Inner::External(source) => {
+                usize::try_from(source.len()).map_err(io::Error::other)?
+            },
         };
         Ok(BinaryReader {
             inner,
@@ -280,6 +379,13 @@ impl BinaryReader {
         range: impl std::ops::RangeBounds<usize>,
     ) -> Result<Vec<u8>, BinaryError> {
         let range = crate::range(range, self.len());
+        if range.start > range.end || range.end > self.len {
+            return Err(BinaryError::OutOfBounds {
+                start: range.start,
+                end: range.end,
+                len: self.len,
+            });
+        }
         self.inner.range(range)
     }
 

@@ -5,6 +5,8 @@ mod runtime;
 mod uri;
 
 pub mod formats;
+#[cfg(feature = "zip")]
+pub mod zip_archive;
 
 pub use cache::{CacheError, FileCache, global_cache, set_global_cache};
 pub use cloud_store::CloudError;

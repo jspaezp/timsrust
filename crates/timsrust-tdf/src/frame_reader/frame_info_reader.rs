@@ -25,7 +25,13 @@ impl FrameInfoReader {
         path: impl TDFPathLike,
     ) -> Result<Self, FrameReaderErrorInternal> {
         let tdf_sql_reader = SqlReader::open(&path)?;
-        let sql_frames = SqlFrame::from_sql_reader(&tdf_sql_reader)?;
+        Self::from_sql_reader(&tdf_sql_reader)
+    }
+
+    pub(crate) fn from_sql_reader(
+        tdf_sql_reader: &SqlReader,
+    ) -> Result<Self, FrameReaderErrorInternal> {
+        let sql_frames = SqlFrame::from_sql_reader(tdf_sql_reader)?;
         let acquisition = if sql_frames.iter().any(|x| x.msms_type == 8) {
             AcquisitionType::DDAPASEF
         } else if sql_frames.iter().any(|x| x.msms_type == 9) {
@@ -36,13 +42,13 @@ impl FrameInfoReader {
         let mut window_groups = vec![0; sql_frames.len()];
         let quadrupole_settings;
         if acquisition == AcquisitionType::DIAPASEF {
-            for window_group in
-                SqlWindowGroup::from_sql_reader(&tdf_sql_reader)?
+            for window_group in SqlWindowGroup::from_sql_reader(tdf_sql_reader)?
             {
                 window_groups[window_group.frame - 1] =
                     window_group.window_group;
             }
-            quadrupole_settings = QuadrupoleSettingsReader::new(&path)?;
+            quadrupole_settings =
+                QuadrupoleSettingsReader::from_sql_settings(tdf_sql_reader)?;
         } else {
             quadrupole_settings = vec![];
         }

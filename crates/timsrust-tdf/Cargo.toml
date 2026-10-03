@@ -18,4 +18,10 @@ zstd = { workspace = true }
 workspace = true
 
 [features]
+zip = ["timsrust-core/zip"]
 default = []
+
+[dev-dependencies]
+object_store = { workspace = true }
+zip = { workspace = true }
+tempfile = { workspace = true }

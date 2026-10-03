@@ -20,6 +20,16 @@ pub(crate) struct TdfBlobReaderCompression1 {
 }
 
 impl TdfBlobReaderCompression1 {
+    pub(crate) fn from_binary(binary_file: BinaryReader) -> Self {
+        Self {
+            bin_file_reader: TdfBinFileReader {
+                binary_file,
+                global_file_offset: 0,
+            },
+            max_peaks_per_scan: 0,
+        }
+    }
+
     /// Get a TDF blob compressed with version 1
     /// Basically a reimplementation of the alphatims implementation
     /// Returns the uncompressed data compatible
@@ -38,10 +48,7 @@ impl TdfBlobReaderCompression1 {
         data: &[u8],
         max_peaks_per_scan: usize,
     ) -> Result<Vec<u8>, TdfBlobReaderErrorCompression1> {
-        let scan_count = self
-            .bin_file_reader
-            .get_scan_count(offset)
-            .ok_or(TdfBlobReaderErrorCompression1::NoScanCount)?;
+        let scan_count = self.bin_file_reader.get_scan_count(offset)?;
         let max_peak_count = max_peaks_per_scan * 2;
         // if scan_count > 1000 {
         //     return Err(TdfBlobReaderErrorCompression1::ScanOffsetError);
@@ -105,14 +112,8 @@ impl TdfBlobReaderCompression1 {
         offset: usize,
     ) -> Result<TdfBlobCompression1, TdfBlobReaderErrorCompression1> {
         let offset = self.bin_file_reader.global_file_offset + offset;
-        let byte_count = self
-            .bin_file_reader
-            .get_byte_count(offset)
-            .ok_or(TdfBlobReaderErrorCompression1::InvalidOffset(offset))?;
-        let data = self
-            .bin_file_reader
-            .get_data(offset, byte_count)
-            .ok_or(TdfBlobReaderErrorCompression1::CorruptData)?;
+        let byte_count = self.bin_file_reader.get_byte_count(offset)?;
+        let data = self.bin_file_reader.get_data(offset, byte_count)?;
         if data.is_empty() {
             return Err(TdfBlobReaderErrorCompression1::EmptyData);
         }
@@ -134,13 +135,17 @@ struct TdfBinFileReader {
 impl TdfBinFileReader {
     /// Get scan count, second 4 bytes of the blob
     ///
-    fn get_scan_count(&self, offset: usize) -> Option<usize> {
+    fn get_scan_count(
+        &self,
+        offset: usize,
+    ) -> Result<usize, TdfBlobReaderErrorCompression1> {
         let start = offset + U32_SIZE;
         let end = start + U32_SIZE;
-        let raw_scan_count = self.binary_file.read_range(start..end).ok()?;
-        let scan_count =
-            u32::from_le_bytes(raw_scan_count.try_into().ok()?) as usize;
-        Some(scan_count)
+        let raw_scan_count = self.binary_file.read_range(start..end)?;
+        let raw_scan_count: [u8; U32_SIZE] = raw_scan_count
+            .try_into()
+            .map_err(|_| TdfBlobReaderErrorCompression1::CorruptData)?;
+        Ok(u32::from_le_bytes(raw_scan_count) as usize)
     }
 
     fn new(
@@ -156,19 +161,27 @@ impl TdfBinFileReader {
         Ok(reader)
     }
 
-    fn get_byte_count(&self, offset: usize) -> Option<usize> {
+    fn get_byte_count(
+        &self,
+        offset: usize,
+    ) -> Result<usize, TdfBlobReaderErrorCompression1> {
         let start = offset;
         let end = start + U32_SIZE;
-        let raw_byte_count = self.binary_file.read_range(start..end).ok()?;
-        let byte_count =
-            u32::from_le_bytes(raw_byte_count.try_into().ok()?) as usize;
-        Some(byte_count)
+        let raw_byte_count = self.binary_file.read_range(start..end)?;
+        let raw_byte_count: [u8; U32_SIZE] = raw_byte_count
+            .try_into()
+            .map_err(|_| TdfBlobReaderErrorCompression1::CorruptData)?;
+        Ok(u32::from_le_bytes(raw_byte_count) as usize)
     }
 
-    fn get_data(&self, offset: usize, byte_count: usize) -> Option<Vec<u8>> {
+    fn get_data(
+        &self,
+        offset: usize,
+        byte_count: usize,
+    ) -> Result<Vec<u8>, TdfBlobReaderErrorCompression1> {
         let start = offset + HEADER_SIZE * U32_SIZE;
         let end = offset + byte_count;
-        self.binary_file.read_range(start..end).ok()
+        Ok(self.binary_file.read_range(start..end)?)
     }
 }
 
@@ -183,14 +196,10 @@ pub(crate) enum TdfBlobReaderErrorCompression1 {
     CorruptData,
     #[error("Decompression fails")]
     Decompression,
-    #[error("Invalid offset {0}")]
-    InvalidOffset(usize),
     #[error("{0}")]
     TDFPathError(#[from] TDFPathError),
     #[error("{0}")]
     FileError(#[from] BinaryError),
-    #[error("No scan count found")]
-    NoScanCount,
     #[error("Corrupt frame")]
     CorruptFrame,
 }

@@ -162,7 +162,7 @@ impl SqlReader {
         // Check table or view exists (TDF v5 exposes Precursors etc. as views)
         let exists: bool = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table', 'view') AND name=?1",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table', 'view') AND name=?1 COLLATE NOCASE",
                 rusqlite::params![name],
                 |row| row.get::<_, i64>(0),
             )

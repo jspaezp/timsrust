@@ -16,6 +16,7 @@ object_store = {  workspace = true, optional = true, features = [
     "gcp",
     "http",
 ] }
+zip = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 url = { workspace = true, optional = true }
@@ -29,6 +30,7 @@ serde_arrow = { workspace = true, default-features = true, optional = true, feat
 [features]
 default = ["json", "parquet", "sql", "cloud"]
 cloud = ["dep:object_store", "dep:url", "async"]
+zip = ["dep:zip", "cloud"]
 json = ["dep:serde_json", "dep:serde"]
 parquet = ["dep:parquet", "dep:arrow", "dep:serde_arrow", "dep:serde"]
 sql = ["dep:rusqlite", "dep:serde", "dep:serde_json"]

@@ -28,11 +28,14 @@ serde = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 timsrust-mgf = { workspace = true }
+object_store = { workspace = true, features = ["aws"] }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
 
 [features]
+zip = ["timsrust-core/zip", "timsrust-tdf/zip"]
 sdk = ["timsrust-sdk", "serde"]
 patched = ["timsrust-patched"]
 
@@ -43,3 +46,7 @@ required-features = ["sdk"]
 [[example]]
 name = "with_patched"
 required-features = ["patched"]
+
+[[example]]
+name = "zip_s3"
+required-features = ["zip"]
