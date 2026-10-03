@@ -41,5 +41,11 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --all-targets --exclude timsrust-sdk
 
+      - name: ZIP feature test
+        run: cargo test -p timsrust-tdf --features zip
+
+      - name: S3 ZIP example check
+        run: cargo check -p timsrust --features zip --example zip_s3
+
       - name: File sizes
         run: find crates clis python -name '*.rs' | xargs wc -l | sort -nr

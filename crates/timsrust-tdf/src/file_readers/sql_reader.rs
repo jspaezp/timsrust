@@ -18,6 +18,13 @@ pub(crate) struct SqlReader {
 }
 
 impl SqlReader {
+    pub(crate) fn open_file(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, SqlReaderError> {
+        let inner = NewSqlReader::from(path.as_ref())?;
+        Ok(Self { inner })
+    }
+
     pub(crate) fn open(path: impl TDFPathLike) -> Result<Self, SqlReaderError> {
         let path = path.to_timstof_path()?;
         let inner = NewSqlReader::from(path.tdf().as_ref())?;

@@ -34,6 +34,7 @@ timsrust = "0.5"
 Optional features:
 - `sdk` — Use Bruker SDK for calibration (requires SDK binary; see [Using the Bruker SDK](#using-the-bruker-sdk))
 - `patched` — Use custom algorithms (via `[patch.crates-io]`)
+- `zip` — Read TDF frames from a ZIP in an injected object store
 
 ### Basic Usage
 
@@ -101,6 +102,7 @@ Runnable examples live in [crates/timsrust/examples/](crates/timsrust/examples/)
 | [convert_to_mgf](crates/timsrust/examples/convert_to_mgf.rs) | Export spectra to a Mascot Generic Format file using `timsrust-mgf` |
 | [with_sdk](crates/timsrust/examples/with_sdk.rs) | Use the Bruker SDK calibration backend (requires `--features sdk`) |
 | [with_patched](crates/timsrust/examples/with_patched.rs) | Use a `timsrust-patched` calibration backend (requires `--features patched`) |
+| [zip_s3](crates/timsrust/examples/zip_s3.rs) | Read TDF frames from a ZIP in S3 (requires `--features zip`) |
 
 ## Understanding TimsRust Data Model
 
@@ -442,6 +444,12 @@ for spectrum in spectrum_reader:
 - **Readers**: `timsrust-tdf` crate; full frame access via `TimsTofPath::frame_reader()`
 - **Converters**: Tof → m/z, Scan → IM, Frame → RT (all from TDF metadata)
 - **Best for**: Full data access, frame-level processing
+
+`TdfFrameReader::from_parts` accepts a local `analysis.tdf` and a separate
+byte-range source for `analysis.tdf_bin`. With the `zip` feature, a ZIP stored in
+S3 can supply the binary member without downloading the whole archive. The
+binary member must use ZIP's Stored method; the SQLite member may be compressed
+and is extracted to a caller-chosen local path. See the [S3 ZIP example](crates/timsrust/examples/zip_s3.rs).
 
 ### miniTDF (ProteoScape Format)
 

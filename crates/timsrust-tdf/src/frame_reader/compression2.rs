@@ -16,6 +16,15 @@ pub(crate) struct TdfBlobReader {
 }
 
 impl TdfBlobReader {
+    pub(crate) fn from_binary(binary_file: BinaryReader) -> Self {
+        Self {
+            bin_file_reader: TdfBinFileReader {
+                binary_file,
+                global_file_offset: 0,
+            },
+        }
+    }
+
     pub(crate) fn new(
         path: Result<TDFPath, TDFPathError>,
     ) -> Result<Self, TdfBlobReaderError> {
@@ -29,14 +38,8 @@ impl TdfBlobReader {
         offset: usize,
     ) -> Result<TdfBlob, TdfBlobReaderError> {
         let offset = self.bin_file_reader.global_file_offset + offset;
-        let byte_count = self
-            .bin_file_reader
-            .get_byte_count(offset)
-            .ok_or(TdfBlobReaderError::InvalidOffset(offset))?;
-        let data = self
-            .bin_file_reader
-            .get_data(offset, byte_count)
-            .ok_or(TdfBlobReaderError::CorruptData)?;
+        let byte_count = self.bin_file_reader.get_byte_count(offset)?;
+        let data = self.bin_file_reader.get_data(offset, byte_count)?;
         if data.is_empty() {
             return Err(TdfBlobReaderError::EmptyData);
         }
@@ -66,19 +69,27 @@ impl TdfBinFileReader {
         Ok(reader)
     }
 
-    fn get_byte_count(&self, offset: usize) -> Option<usize> {
+    fn get_byte_count(
+        &self,
+        offset: usize,
+    ) -> Result<usize, TdfBlobReaderError> {
         let start = offset;
         let end = start + U32_SIZE;
-        let raw_byte_count = self.binary_file.read_range(start..end).ok()?;
-        let byte_count =
-            u32::from_le_bytes(raw_byte_count.try_into().ok()?) as usize;
-        Some(byte_count)
+        let raw_byte_count = self.binary_file.read_range(start..end)?;
+        let raw_byte_count: [u8; U32_SIZE] = raw_byte_count
+            .try_into()
+            .map_err(|_| TdfBlobReaderError::CorruptData)?;
+        Ok(u32::from_le_bytes(raw_byte_count) as usize)
     }
 
-    fn get_data(&self, offset: usize, byte_count: usize) -> Option<Vec<u8>> {
+    fn get_data(
+        &self,
+        offset: usize,
+        byte_count: usize,
+    ) -> Result<Vec<u8>, TdfBlobReaderError> {
         let start = offset + HEADER_SIZE * U32_SIZE;
         let end = offset + byte_count;
-        self.binary_file.read_range(start..end).ok()
+        Ok(self.binary_file.read_range(start..end)?)
     }
 }
 
@@ -93,8 +104,6 @@ pub(crate) enum TdfBlobReaderError {
     CorruptData,
     #[error("Decompression fails")]
     Decompression,
-    #[error("Invalid offset {0}")]
-    InvalidOffset(usize),
     #[error("{0}")]
     TDFPathError(#[from] TDFPathError),
     #[error("{0}")]

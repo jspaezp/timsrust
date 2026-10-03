@@ -1,11 +1,12 @@
-use crate::{CloudError, CloudProvider};
+use crate::{CloudError, cloud_store::CloudProvider};
 
 impl CloudProvider {
-    pub(crate) fn parse(url: impl AsRef<str>) -> Option<Self> {
+    pub(crate) fn parse(_url: impl AsRef<str>) -> Option<Self> {
         None
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct CloudObject {}
 
 impl CloudObject {
@@ -38,14 +39,14 @@ impl CloudObject {
 
     pub(crate) fn upload_bytes(
         &self,
-        bytes: Vec<u8>,
+        _bytes: Vec<u8>,
     ) -> Result<(), CloudError> {
         Err(CloudError::FeatureNotEnabled)
     }
 
     pub(crate) fn upload_from(
         &self,
-        src: impl AsRef<std::path::Path>,
+        _src: impl AsRef<std::path::Path>,
     ) -> Result<(), CloudError> {
         Err(CloudError::FeatureNotEnabled)
     }

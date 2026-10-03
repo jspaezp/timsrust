@@ -28,7 +28,7 @@ impl QuadrupoleSettingsReader {
         Self::from_sql_settings(&tdf_sql_reader)
     }
 
-    fn from_sql_settings(
+    pub(crate) fn from_sql_settings(
         tdf_sql_reader: &SqlReader,
     ) -> Result<Vec<QuadrupoleSettings>, QuadrupoleSettingsReaderError> {
         let sql_quadrupole_settings =
